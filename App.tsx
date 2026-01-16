@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Platform, PC_SPECS, MOBILE_SPECS, BannerSpec } from './constants';
 import { generateBannerSet, GeneratedImage, GenerationInput } from './services/imageService';
 import { ProgressBar } from './components/ProgressBar';
@@ -17,6 +17,16 @@ const App: React.FC = () => {
   const [statusText, setStatusText] = useState('');
   const [results, setResults] = useState<GeneratedImage[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(true);
+
+  // Pre-load JSZip on mount
+  useEffect(() => {
+    if (typeof (window as any).JSZip === 'undefined') {
+      const script = document.createElement('script');
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  }, []);
 
   const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
@@ -45,7 +55,6 @@ const App: React.FC = () => {
     if (window.innerWidth < 1024) setIsMenuOpen(false);
     
     const specs = platform === Platform.PC ? PC_SPECS : MOBILE_SPECS;
-    // 預設生成使用 PNG 原始品質，下載時再轉換
     const input: GenerationInput = { 
       theme, 
       title: '', 
@@ -73,57 +82,65 @@ const App: React.FC = () => {
       setProgress(specs.length);
       setStatusText(`全套生成完成！`);
     } catch (error: any) {
-      console.error(error);
-      const errorMsg = error.message?.includes('429') 
-        ? "請求過於頻繁，請稍候再試。" 
-        : "生成失敗，請檢查 API Key 或網路。";
-      alert(errorMsg);
+      console.error("Generate Error:", error);
+      const msg = error.message || "未知錯誤";
+      alert(`生成失敗: ${msg}\n請檢查 API Key 設定是否正確。`);
     } finally {
       setLoading(false);
     }
   };
 
   const convertAndDownload = async (sourceBase64: string, filename: string, targetExt: 'png' | 'jpeg' | 'gif') => {
-    const img = new Image();
-    img.src = `data:image/png;base64,${sourceBase64}`;
-    await img.decode();
+    try {
+      const img = new Image();
+      img.src = `data:image/png;base64,${sourceBase64}`;
+      await img.decode();
 
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    ctx.drawImage(img, 0, 0);
-    
-    const mimeType = `image/${targetExt === 'jpeg' ? 'jpeg' : targetExt}`;
-    const quality = targetExt === 'jpeg' ? 0.85 : 1;
-    const finalDataUrl = canvas.toDataURL(mimeType, quality);
-    
-    const link = document.createElement('a');
-    link.href = finalDataUrl;
-    const ext = targetExt === 'jpeg' ? 'jpg' : targetExt;
-    link.download = filename.replace('.png', `.${ext}`);
-    link.click();
+      ctx.drawImage(img, 0, 0);
+      
+      const mimeType = `image/${targetExt === 'jpeg' ? 'jpeg' : targetExt}`;
+      const quality = targetExt === 'jpeg' ? 0.85 : 1;
+      const finalDataUrl = canvas.toDataURL(mimeType, quality);
+      
+      const link = document.createElement('a');
+      link.href = finalDataUrl;
+      const ext = targetExt === 'jpeg' ? 'jpg' : targetExt;
+      link.download = filename.replace('.png', `.${ext}`);
+      link.click();
+    } catch (err) {
+      console.error("Download Error:", err);
+      alert("下載轉換失敗。");
+    }
   };
 
   const downloadZip = async () => {
     if (!results.length) return;
+    
     if (typeof (window as any).JSZip === 'undefined') {
-      const script = document.createElement('script');
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
-      document.head.appendChild(script);
-      await new Promise(r => script.onload = r);
+      alert("正在加載壓縮組件，請稍候再試...");
+      return;
     }
-    const zip = new (window as any).JSZip();
-    results.forEach((res) => {
-      zip.file(res.spec.fileName, res.base64, { base64: true });
-    });
-    const content = await zip.generateAsync({ type: 'blob' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(content);
-    link.download = `Casino_BannerSet_${theme}.zip`;
-    link.click();
+
+    try {
+      const zip = new (window as any).JSZip();
+      results.forEach((res) => {
+        zip.file(res.spec.fileName, res.base64, { base64: true });
+      });
+      const content = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `Casino_BannerSet_${theme || 'export'}.zip`;
+      link.click();
+    } catch (err) {
+      console.error("ZIP Error:", err);
+      alert("建立壓縮檔失敗。");
+    }
   };
 
   return (
@@ -225,7 +242,6 @@ const App: React.FC = () => {
                         </div>
                       </div>
                       
-                      {/* 下載格式選擇按鈕組 */}
                       <div className="flex items-center gap-1.5 p-1 bg-black/40 rounded-xl border border-white/5">
                         <span className="text-[9px] font-bold text-slate-600 px-2 uppercase">輸出:</span>
                         {(['png', 'jpeg', 'gif'] as const).map(fmt => (
