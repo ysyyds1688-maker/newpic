@@ -21,8 +21,8 @@ export async function generateBannerSet(
   specs: BannerSpec[],
   input: GenerationInput
 ): Promise<GeneratedImage[]> {
+  // Ensure we always have a fresh instance with the current key
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
-  
   const results: GeneratedImage[] = [];
 
   for (const spec of specs) {
@@ -42,10 +42,13 @@ Design Requirements:
 - NO TEXT: Strictly NO letters, numbers, or words in the image.
 - QUALITY: Sharp focus, 8k resolution, professional 3D rendering or high-end photography style.
 
-Specific Size Context: ${spec.width}x${spec.height}.
+Usage context: This is for a ${spec.width}x${spec.height} banner.
 Make the subject pop with vibrant colors matching the ${input.style} style.`;
 
     try {
+      // Use the closest supported aspect ratio for the model
+      const modelAspectRatio = getClosestSupportedAspectRatio(spec.width, spec.height);
+      
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
@@ -53,23 +56,30 @@ Make the subject pop with vibrant colors matching the ${input.style} style.`;
         },
         config: {
           imageConfig: {
-            aspectRatio: getClosestAspectRatio(spec.width, spec.height),
+            aspectRatio: modelAspectRatio,
           },
         },
       });
 
       let base64Data = "";
-      for (const part of response.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData) {
-          base64Data = part.inlineData.data;
-          break;
+      // Check if candidates exist and have content
+      if (response.candidates && response.candidates[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData) {
+            base64Data = part.inlineData.data;
+            break;
+          }
         }
       }
 
-      if (!base64Data) throw new Error(`Failed to generate image`);
+      if (!base64Data) {
+        console.error(`No image data returned for ${spec.name}`);
+        throw new Error(`Failed to generate image: No data returned from model`);
+      }
 
       const outputFormat = input.format === 'gif' ? 'gif' : (input.format === 'jpeg' ? 'jpeg' : 'png');
 
+      // Process the image to the EXACT required spec size (handles cropping for extreme ratios)
       const finalImageUrl = await processImage(
         `data:image/png;base64,${base64Data}`, 
         spec.width, 
@@ -85,13 +95,18 @@ Make the subject pop with vibrant colors matching the ${input.style} style.`;
       });
     } catch (error) {
       console.error(`Error generating ${spec.name}:`, error);
+      throw error; // Re-throw to be caught by the UI
     }
   }
 
   return results;
 }
 
-function getClosestAspectRatio(w: number, h: number): "1:1" | "3:4" | "4:3" | "9:16" | "16:9" {
+/**
+ * Maps the banner dimensions to the closest supported Gemini aspect ratio.
+ * Gemini 2.5 Flash Image supports: "1:1", "3:4", "4:3", "9:16", "16:9"
+ */
+function getClosestSupportedAspectRatio(w: number, h: number): "1:1" | "3:4" | "4:3" | "9:16" | "16:9" {
   const ratio = w / h;
   const supported = [
     { name: "1:1" as const, value: 1 },
@@ -100,46 +115,61 @@ function getClosestAspectRatio(w: number, h: number): "1:1" | "3:4" | "4:3" | "9
     { name: "9:16" as const, value: 9/16 },
     { name: "16:9" as const, value: 16/9 },
   ];
+  
   return supported.reduce((prev, curr) => 
     Math.abs(curr.value - ratio) < Math.abs(prev.value - ratio) ? curr : prev
   ).name;
 }
 
+/**
+ * Resizes and crops the source image to match the target specification exactly.
+ */
 async function processImage(dataUrl: string, targetWidth: number, targetHeight: number, format: 'png' | 'jpeg' | 'gif'): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.onload = () => {
       const canvas = document.createElement('canvas');
       canvas.width = targetWidth;
       canvas.height = targetHeight;
       const ctx = canvas.getContext('2d');
-      if (ctx) {
-        const imgRatio = img.width / img.height;
-        const targetRatio = targetWidth / targetHeight;
-        let sw, sh, sx, sy;
-
-        if (imgRatio > targetRatio) {
-          sh = img.height;
-          sw = img.height * targetRatio;
-          sx = (img.width - sw) / 2;
-          sy = 0;
-        } else {
-          sw = img.width;
-          sh = img.width / targetRatio;
-          sx = 0;
-          sy = (img.height - sh) / 2;
-        }
-
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetWidth, targetHeight);
-        const mimeType = `image/${format === 'gif' ? 'gif' : format}`;
-        const quality = format === 'jpeg' ? 0.85 : 1;
-        let result = canvas.toDataURL(mimeType, quality);
-        if (result.length > 2700000 && format === 'jpeg') {
-          result = canvas.toDataURL(mimeType, 0.7);
-        }
-        resolve(result);
+      
+      if (!ctx) {
+        reject(new Error("Failed to get canvas context"));
+        return;
       }
+
+      // High quality scaling
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      const imgRatio = img.width / img.height;
+      const targetRatio = targetWidth / targetHeight;
+      let sw, sh, sx, sy;
+
+      // Center crop logic
+      if (imgRatio > targetRatio) {
+        // Source is wider than target
+        sh = img.height;
+        sw = img.height * targetRatio;
+        sx = (img.width - sw) / 2;
+        sy = 0;
+      } else {
+        // Source is taller than target
+        sw = img.width;
+        sh = img.width / targetRatio;
+        sx = 0;
+        sy = (img.height - sh) / 2;
+      }
+
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetWidth, targetHeight);
+      
+      const mimeType = `image/${format === 'gif' ? 'gif' : format}`;
+      const quality = format === 'jpeg' ? 0.92 : 1.0;
+      
+      resolve(canvas.toDataURL(mimeType, quality));
     };
+    img.onerror = () => reject(new Error("Failed to load image for processing"));
     img.src = dataUrl;
   });
 }
