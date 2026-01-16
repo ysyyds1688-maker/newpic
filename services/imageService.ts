@@ -38,6 +38,9 @@ const getApiKey = (): string => {
   return "";
 };
 
+/**
+ * 生成一張基礎圖片，然後調整到所有規格
+ */
 export async function generateBannerSet(
   specs: BannerSpec[],
   input: GenerationInput
@@ -50,57 +53,68 @@ export async function generateBannerSet(
 
   // 根據 SDK 指導，直接初始化
   const ai = new GoogleGenAI({ apiKey });
-  const results: GeneratedImage[] = [];
+  
+  // 找到最大尺寸的規格作為基礎圖片尺寸
+  const maxSpec = specs.reduce((max, spec) => {
+    const maxArea = max.width * max.height;
+    const specArea = spec.width * spec.height;
+    return specArea > maxArea ? spec : max;
+  }, specs[0]);
 
-  for (const spec of specs) {
-    const subjectPrompt = input.subject ? `The primary visual focus should be ${input.subject}.` : "The primary visual focus should be an appropriate high-end casino or event-related object.";
-    
-    const prompt = `Professional commercial promotional banner for an iGaming/Casino event.
+  const subjectPrompt = input.subject ? `The primary visual focus should be ${input.subject}.` : "The primary visual focus should be an appropriate high-end casino or event-related object.";
+  
+  const prompt = `Professional commercial promotional banner for an iGaming/Casino event.
 Theme: ${input.theme}
 Visual Style: ${input.style}.
 Main Subject: ${subjectPrompt}
-Context: This image will be used for ${spec.usage}.
 Design Requirements:
 - HIGH-END AESTHETIC: Sleek, modern, and cinematic.
 - COMPOSITION: Position the main subject to either the left or right side.
 - SAFE ZONE: Leave significant BLANK SPACE on the opposite side of the subject for text overlay.
 - NO TEXT: Strictly NO letters, numbers, or words in the image.
 - QUALITY: Sharp focus, 8k resolution.
-Usage context: This is for a ${spec.width}x${spec.height} banner.`;
+- UNIVERSAL DESIGN: This image will be resized for multiple banner sizes (PC and mobile), so ensure the composition works well at different aspect ratios.`;
 
-    try {
-      const modelAspectRatio = getClosestSupportedAspectRatio(spec.width, spec.height);
-      
-      // 使用正確的 generateContent 調用方式
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [{ text: prompt }],
+  try {
+    // 使用最大規格的比例生成基礎圖片
+    const modelAspectRatio = getClosestSupportedAspectRatio(maxSpec.width, maxSpec.height);
+    
+    // 使用正確的 generateContent 調用方式
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: [{ text: prompt }],
+      },
+      config: {
+        imageConfig: {
+          aspectRatio: modelAspectRatio,
         },
-        config: {
-          imageConfig: {
-            aspectRatio: modelAspectRatio,
-          },
-        },
-      });
+      },
+    });
 
-      let base64Data = "";
-      if (response.candidates && response.candidates[0]?.content?.parts) {
-        for (const part of response.candidates[0].content.parts) {
-          if (part.inlineData) {
-            base64Data = part.inlineData.data;
-            break;
-          }
+    let base64Data = "";
+    if (response.candidates && response.candidates[0]?.content?.parts) {
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+          base64Data = part.inlineData.data;
+          break;
         }
       }
+    }
 
-      if (!base64Data) {
-        throw new Error(`無法從模型獲取圖片數據 (${spec.name})`);
-      }
+    if (!base64Data) {
+      throw new Error(`無法從模型獲取圖片數據`);
+    }
 
+    // 基礎圖片使用 PNG 格式（最高質量）
+    const baseImageUrl = `data:image/png;base64,${base64Data}`;
+    const results: GeneratedImage[] = [];
+
+    // 將基礎圖片調整到所有規格
+    for (const spec of specs) {
       const outputFormat = input.format === 'gif' ? 'gif' : (input.format === 'jpeg' ? 'jpeg' : 'png');
       const finalImageUrl = await processImage(
-        `data:image/png;base64,${base64Data}`, 
+        baseImageUrl, 
         spec.width, 
         spec.height, 
         outputFormat as any
@@ -112,13 +126,13 @@ Usage context: This is for a ${spec.width}x${spec.height} banner.`;
         base64: finalImageUrl.split(',')[1],
         format: outputFormat
       });
-    } catch (error: any) {
-      console.error(`Generation error for ${spec.name}:`, error);
-      throw error;
     }
-  }
 
-  return results;
+    return results;
+  } catch (error: any) {
+    console.error(`Generation error:`, error);
+    throw error;
+  }
 }
 
 function getClosestSupportedAspectRatio(w: number, h: number): "1:1" | "3:4" | "4:3" | "9:16" | "16:9" {

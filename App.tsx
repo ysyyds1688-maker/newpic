@@ -16,8 +16,13 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
-  const [results, setResults] = useState<GeneratedImage[]>([]);
+  // 分別存儲 PC 和 Mobile 的結果
+  const [pcResults, setPcResults] = useState<GeneratedImage[]>([]);
+  const [mobileResults, setMobileResults] = useState<GeneratedImage[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(true);
+  
+  // 根據當前平台返回對應的結果
+  const results = platform === Platform.PC ? pcResults : mobileResults;
 
   // Pre-load JSZip on mount
   useEffect(() => {
@@ -58,10 +63,10 @@ const App: React.FC = () => {
     }
 
     setLoading(true);
-    setResults([]);
+    setPcResults([]);
+    setMobileResults([]);
     if (window.innerWidth < 1024) setIsMenuOpen(false);
     
-    const specs = platform === Platform.PC ? PC_SPECS : MOBILE_SPECS;
     const input: GenerationInput = { 
       theme, 
       title: '', 
@@ -72,23 +77,50 @@ const App: React.FC = () => {
     };
     
     try {
-      setStatusText("正在啟動視覺引擎...");
+      setStatusText("正在生成基礎圖片...");
+      setProgress(0);
       
-      for (let i = 0; i < specs.length; i++) {
-        setProgress(i);
-        setStatusText(`正在繪製 ${specs[i].name}...`);
-        
-        if (i > 0) await delay(800);
-
-        const result = await generateBannerSet([specs[i]], input);
-        
-        if (result.length > 0) {
-          setResults(prev => [...prev, result[0]]);
+      // 同時生成 PC 和 Mobile 的所有規格（從同一張基礎圖片調整）
+      const allSpecs = [...PC_SPECS, ...MOBILE_SPECS];
+      const allResults = await generateBannerSet(allSpecs, input);
+      
+      // 分離 PC 和 Mobile 的結果
+      const pcResultsList: GeneratedImage[] = [];
+      const mobileResultsList: GeneratedImage[] = [];
+      
+      for (const result of allResults) {
+        if (result.spec.id.startsWith('pc_')) {
+          pcResultsList.push(result);
+        } else if (result.spec.id.startsWith('mb_')) {
+          mobileResultsList.push(result);
         }
       }
       
-      setProgress(specs.length);
-      setStatusText(`全套生成完成！`);
+      // 更新進度
+      setStatusText("正在調整圖片規格...");
+      
+      // 逐步顯示 PC 結果
+      for (let i = 0; i < pcResultsList.length; i++) {
+        setProgress(i + 1);
+        setStatusText(`正在處理 PC ${pcResultsList[i].spec.name}...`);
+        setPcResults(prev => [...prev, pcResultsList[i]]);
+        if (i < pcResultsList.length - 1) {
+          await delay(200);
+        }
+      }
+      
+      // 逐步顯示 Mobile 結果
+      for (let i = 0; i < mobileResultsList.length; i++) {
+        setProgress(pcResultsList.length + i + 1);
+        setStatusText(`正在處理 Mobile ${mobileResultsList[i].spec.name}...`);
+        setMobileResults(prev => [...prev, mobileResultsList[i]]);
+        if (i < mobileResultsList.length - 1) {
+          await delay(200);
+        }
+      }
+      
+      setProgress(allSpecs.length);
+      setStatusText(`全套生成完成！PC: ${pcResultsList.length} 個，Mobile: ${mobileResultsList.length} 個`);
     } catch (error: any) {
       console.error("Generate Error:", error);
       let errorMsg = "未知錯誤";
@@ -138,7 +170,7 @@ const App: React.FC = () => {
       if (targetExt === 'jpeg') {
         // For JPEG, reduce quality progressively
         let attempts = 0;
-        while (attempts < 15) {
+        while (attempts < 20) {
           finalDataUrl = workCanvas.toDataURL(mimeType, quality);
           const fileSize = getFileSize(finalDataUrl);
           
@@ -159,6 +191,8 @@ const App: React.FC = () => {
           resizedCanvas.height = newHeight;
           const resizedCtx = resizedCanvas.getContext('2d');
           if (resizedCtx) {
+            resizedCtx.imageSmoothingEnabled = true;
+            resizedCtx.imageSmoothingQuality = 'high';
             resizedCtx.drawImage(canvas, 0, 0, newWidth, newHeight);
             finalDataUrl = resizedCanvas.toDataURL(mimeType, 0.8);
           }
@@ -169,6 +203,7 @@ const App: React.FC = () => {
         let fileSize = getFileSize(finalDataUrl);
         
         if (fileSize > maxSize) {
+          // Try reducing dimensions
           const scaleFactor = Math.sqrt(maxSize / fileSize) * 0.9;
           const newWidth = Math.floor(canvas.width * scaleFactor);
           const newHeight = Math.floor(canvas.height * scaleFactor);
@@ -178,8 +213,27 @@ const App: React.FC = () => {
           resizedCanvas.height = newHeight;
           const resizedCtx = resizedCanvas.getContext('2d');
           if (resizedCtx) {
+            resizedCtx.imageSmoothingEnabled = true;
+            resizedCtx.imageSmoothingQuality = 'high';
             resizedCtx.drawImage(canvas, 0, 0, newWidth, newHeight);
             finalDataUrl = resizedCanvas.toDataURL(mimeType);
+            
+            // If still too large, convert to JPEG
+            fileSize = getFileSize(finalDataUrl);
+            if (fileSize > maxSize) {
+              let jpegQuality = 0.85;
+              while (jpegQuality > 0.3 && getFileSize(resizedCanvas.toDataURL('image/jpeg', jpegQuality)) > maxSize) {
+                jpegQuality -= 0.1;
+              }
+              finalDataUrl = resizedCanvas.toDataURL('image/jpeg', jpegQuality);
+              const ext = 'jpg';
+              const link = document.createElement('a');
+              link.href = finalDataUrl;
+              link.download = filename.replace(/\.(png|jpg|gif)$/i, `.${ext}`);
+              link.click();
+              alert("PNG 檔案過大，已轉換為 JPG 格式下載。");
+              return;
+            }
           }
         }
       } else if (targetExt === 'gif') {
@@ -189,7 +243,11 @@ const App: React.FC = () => {
         
         if (fileSize > maxSize) {
           // Convert to JPEG for better compression
-          finalDataUrl = workCanvas.toDataURL('image/jpeg', 0.8);
+          let jpegQuality = 0.85;
+          while (jpegQuality > 0.3 && getFileSize(workCanvas.toDataURL('image/jpeg', jpegQuality)) > maxSize) {
+            jpegQuality -= 0.1;
+          }
+          finalDataUrl = workCanvas.toDataURL('image/jpeg', jpegQuality);
           fileSize = getFileSize(finalDataUrl);
           
           // If still too large, reduce dimensions
@@ -203,6 +261,8 @@ const App: React.FC = () => {
             resizedCanvas.height = newHeight;
             const resizedCtx = resizedCanvas.getContext('2d');
             if (resizedCtx) {
+              resizedCtx.imageSmoothingEnabled = true;
+              resizedCtx.imageSmoothingQuality = 'high';
               resizedCtx.drawImage(canvas, 0, 0, newWidth, newHeight);
               finalDataUrl = resizedCanvas.toDataURL('image/jpeg', 0.8);
             }
@@ -211,9 +271,34 @@ const App: React.FC = () => {
           const ext = 'jpg';
           const link = document.createElement('a');
           link.href = finalDataUrl;
-          link.download = filename.replace('.png', `.${ext}`);
+          link.download = filename.replace(/\.(png|jpg|gif)$/i, `.${ext}`);
           link.click();
           alert("GIF 檔案過大，已轉換為 JPG 格式下載。");
+          return;
+        }
+      }
+      
+      // Final size check before download
+      const finalSize = getFileSize(finalDataUrl);
+      if (finalSize > maxSize) {
+        alert(`警告：檔案大小為 ${(finalSize / 1024 / 1024).toFixed(2)}MB，超過 2MB 限制。將自動壓縮...`);
+        // Force convert to JPEG with lower quality
+        const jpegCanvas = document.createElement('canvas');
+        jpegCanvas.width = canvas.width;
+        jpegCanvas.height = canvas.height;
+        const jpegCtx = jpegCanvas.getContext('2d');
+        if (jpegCtx) {
+          jpegCtx.drawImage(canvas, 0, 0);
+          let jpegQuality = 0.7;
+          while (jpegQuality > 0.3 && getFileSize(jpegCanvas.toDataURL('image/jpeg', jpegQuality)) > maxSize) {
+            jpegQuality -= 0.1;
+          }
+          finalDataUrl = jpegCanvas.toDataURL('image/jpeg', jpegQuality);
+          const ext = 'jpg';
+          const link = document.createElement('a');
+          link.href = finalDataUrl;
+          link.download = filename.replace(/\.(png|jpg|gif)$/i, `.${ext}`);
+          link.click();
           return;
         }
       }
@@ -221,7 +306,7 @@ const App: React.FC = () => {
       const link = document.createElement('a');
       link.href = finalDataUrl;
       const ext = targetExt === 'jpeg' ? 'jpg' : targetExt;
-      link.download = filename.replace('.png', `.${ext}`);
+      link.download = filename.replace(/\.(png|jpg|gif)$/i, `.${ext}`);
       link.click();
     } catch (err) {
       console.error("Download Error:", err);
@@ -256,7 +341,8 @@ const App: React.FC = () => {
       const content = await zip.generateAsync({ type: 'blob' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(content);
-      link.download = `Casino_BannerSet_${theme || 'export'}.zip`;
+      const platformName = platform === Platform.PC ? 'PC' : 'Mobile';
+      link.download = `Casino_BannerSet_${platformName}_${theme || 'export'}.zip`;
       link.click();
     } catch (err) {
       console.error("ZIP Error:", err);
@@ -305,13 +391,49 @@ const App: React.FC = () => {
               </h2>
 
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => setPlatform(Platform.PC)} className={`py-3 rounded-2xl border transition-all text-xs font-bold flex flex-col items-center gap-2 ${platform === Platform.PC ? 'border-yellow-500 bg-yellow-500/10 text-yellow-500' : 'border-white/5 bg-white/5 text-slate-500 opacity-60'}`}>
-                    <Monitor size={16} /> PC 網頁版
-                  </button>
-                  <button onClick={() => setPlatform(Platform.MOBILE)} className={`py-3 rounded-2xl border transition-all text-xs font-bold flex flex-col items-center gap-2 ${platform === Platform.MOBILE ? 'border-yellow-500 bg-yellow-500/10 text-yellow-500' : 'border-white/5 bg-white/5 text-slate-500 opacity-60'}`}>
-                    <Smartphone size={16} /> 行動版
-                  </button>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase">選擇平台</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button 
+                      onClick={() => setPlatform(Platform.PC)} 
+                      disabled={loading}
+                      className={`py-3 rounded-2xl border transition-all text-xs font-bold flex flex-col items-center gap-2 relative ${
+                        platform === Platform.PC 
+                          ? 'border-yellow-500 bg-yellow-500/10 text-yellow-500' 
+                          : 'border-white/5 bg-white/5 text-slate-500 opacity-60 hover:opacity-80'
+                      } ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <Monitor size={16} /> 
+                      <span>PC 網頁版</span>
+                      {pcResults.length > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                          {pcResults.length}
+                        </span>
+                      )}
+                    </button>
+                    <button 
+                      onClick={() => setPlatform(Platform.MOBILE)} 
+                      disabled={loading}
+                      className={`py-3 rounded-2xl border transition-all text-xs font-bold flex flex-col items-center gap-2 relative ${
+                        platform === Platform.MOBILE 
+                          ? 'border-yellow-500 bg-yellow-500/10 text-yellow-500' 
+                          : 'border-white/5 bg-white/5 text-slate-500 opacity-60 hover:opacity-80'
+                      } ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    >
+                      <Smartphone size={16} /> 
+                      <span>行動版</span>
+                      {mobileResults.length > 0 && (
+                        <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                          {mobileResults.length}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                  {(pcResults.length > 0 || mobileResults.length > 0) && !loading && (
+                    <p className="text-[10px] text-slate-500 text-center">
+                      點擊切換查看不同平台的圖片
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -347,7 +469,7 @@ const App: React.FC = () => {
                 {loading ? <Loader2 className="animate-spin mx-auto" /> : "生成完整套組"}
               </button>
 
-              {loading && <ProgressBar current={progress} total={platform === Platform.PC ? PC_SPECS.length : MOBILE_SPECS.length} status={statusText} />}
+              {loading && <ProgressBar current={progress} total={PC_SPECS.length + MOBILE_SPECS.length} status={statusText} />}
             </div>
           </div>
 
@@ -360,7 +482,7 @@ const App: React.FC = () => {
               </h2>
               {results.length > 0 && (
                 <button onClick={downloadZip} className="flex items-center gap-2 bg-yellow-500 text-black px-4 py-2 rounded-xl text-xs font-black hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/10">
-                  <FolderArchive size={16} /> 打包下載 (PNG)
+                  <FolderArchive size={16} /> 打包下載 {platform === Platform.PC ? 'PC' : 'Mobile'} (PNG)
                 </button>
               )}
             </div>
@@ -369,7 +491,18 @@ const App: React.FC = () => {
               {results.length === 0 && !loading ? (
                 <div className="aspect-video bg-white/5 border-2 border-dashed border-white/10 rounded-[2rem] flex flex-col items-center justify-center text-slate-600">
                   <ImageIcon size={64} className="mb-4 opacity-5" />
-                  <p className="font-bold uppercase tracking-widest text-sm opacity-20">等待生成中</p>
+                  {(pcResults.length > 0 || mobileResults.length > 0) ? (
+                    <>
+                      <p className="font-bold uppercase tracking-widest text-sm opacity-20 mb-2">
+                        {platform === Platform.PC ? 'PC' : 'Mobile'} 版本尚未生成
+                      </p>
+                      <p className="text-xs text-slate-500 opacity-50">
+                        點擊「生成完整套組」將同時生成 PC 和 Mobile 版本
+                      </p>
+                    </>
+                  ) : (
+                    <p className="font-bold uppercase tracking-widest text-sm opacity-20">等待生成中</p>
+                  )}
                 </div>
               ) : (
                 results.map((res, i) => (
@@ -410,7 +543,7 @@ const App: React.FC = () => {
                 ))
               )}
               
-              {loading && results.length < (platform === Platform.PC ? PC_SPECS.length : MOBILE_SPECS.length) && (
+              {loading && results.length < (platform === Platform.PC ? PC_SPECS.length : MOBILE_SPECS.length) && (pcResults.length > 0 || mobileResults.length > 0) && (
                 <div className="bg-slate-900/50 border border-dashed border-white/5 rounded-3xl p-16 flex flex-col items-center justify-center space-y-4">
                   <div className="relative">
                     <Loader2 size={40} className="text-yellow-500 animate-spin" />
