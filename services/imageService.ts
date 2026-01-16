@@ -6,6 +6,7 @@ export interface GenerationInput {
   theme: string;
   title: string;
   style: string;
+  subject?: string;
   format: 'png' | 'jpeg' | 'gif';
 }
 
@@ -25,21 +26,24 @@ export async function generateBannerSet(
   const results: GeneratedImage[] = [];
 
   for (const spec of specs) {
-    const prompt = `Generate a high-end Casino and iGaming promotional banner.
+    const subjectPrompt = input.subject ? `The primary visual focus should be ${input.subject}.` : "The primary visual focus should be an appropriate high-end casino or event-related object.";
+    
+    const prompt = `Professional commercial promotional banner for an iGaming/Casino event.
 
 Theme: ${input.theme}
-Visual Elements: ${input.style}, luxury gambling elements (chips, gold, cards, or neon effects).
-Target Context: ${spec.usage}
+Visual Style: ${input.style}.
+Main Subject: ${subjectPrompt}
+Context: This image will be used for ${spec.usage}.
 
-Composition Requirements:
-- DARK MODE: Deep blacks, rich purples, or dark gold backgrounds.
-- DESIGN FOR EDITING: Leave significant BLANK SPACE (safe zone) on the left or right side for text overlay.
-- SUBJECT: One strong high-quality 3D rendered subject positioned to the side.
-- STYLE: Professional, sleek, cinematic lighting, sharp focus.
-- NO TEXT: Do not generate any text, letters, or numbers.
+Design Requirements:
+- HIGH-END AESTHETIC: Sleek, modern, and cinematic.
+- COMPOSITION: Clean and balanced. Position the main subject to either the left or right side.
+- SAFE ZONE: Leave significant BLANK SPACE on the opposite side of the subject for text overlay later.
+- NO TEXT: Strictly NO letters, numbers, or words in the image.
+- QUALITY: Sharp focus, 8k resolution, professional 3D rendering or high-end photography style.
 
-Aspect ratio: ${spec.width} x ${spec.height}
-Resolution: Ultra high quality, professional commercial photography style.`;
+Specific Size Context: ${spec.width}x${spec.height}.
+Make the subject pop with vibrant colors matching the ${input.style} style.`;
 
     try {
       const response = await ai.models.generateContent({
@@ -64,7 +68,6 @@ Resolution: Ultra high quality, professional commercial photography style.`;
 
       if (!base64Data) throw new Error(`Failed to generate image`);
 
-      // 轉換格式：如果 input.format 是 gif，我們輸出為靜態 gif
       const outputFormat = input.format === 'gif' ? 'gif' : (input.format === 'jpeg' ? 'jpeg' : 'png');
 
       const finalImageUrl = await processImage(
@@ -128,18 +131,12 @@ async function processImage(dataUrl: string, targetWidth: number, targetHeight: 
         }
 
         ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetWidth, targetHeight);
-        
-        // 映射格式
         const mimeType = `image/${format === 'gif' ? 'gif' : format}`;
         const quality = format === 'jpeg' ? 0.85 : 1;
-        
         let result = canvas.toDataURL(mimeType, quality);
-        
-        // 限制檔案體積：若 Base64 超過 2.7M 字元 (約 2MB)，針對 JPEG 調低質量
         if (result.length > 2700000 && format === 'jpeg') {
           result = canvas.toDataURL(mimeType, 0.7);
         }
-        
         resolve(result);
       }
     };
