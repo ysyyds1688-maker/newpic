@@ -4,10 +4,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Banner Spec Generator</title>
+  <title>AI 橫幅規格生成器</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    // 在所有模組載入前建立 process 物件
+    // Create process object before all modules load
     window.process = { 
       env: { 
         NODE_ENV: 'production'
@@ -27,19 +27,9 @@
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
     ::-webkit-scrollbar-thumb:hover { background: #475569; }
   </style>
-<script type="importmap">
-{
-  "imports": {
-    "lucide-react": "https://esm.sh/lucide-react@^0.475.0",
-    "@google/genai": "https://esm.sh/@google/genai",
-    "react/": "https://esm.sh/react@^19.0.0/",
-    "react": "https://esm.sh/react@^19.0.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.0.0/"
-  }
-}
-</script>
 </head>
 <body>
   <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
 </body>
 </html>

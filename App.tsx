@@ -3,15 +3,16 @@ import React, { useState, useEffect } from 'react';
 import { Platform, PC_SPECS, MOBILE_SPECS, BannerSpec } from './constants';
 import { generateBannerSet, GeneratedImage, GenerationInput } from './services/imageService';
 import { ProgressBar } from './components/ProgressBar';
-import { Download, Layout, Smartphone, Monitor, Image as ImageIcon, CheckCircle2, Loader2, Sparkles, FolderArchive, FileType, Menu, X } from 'lucide-react';
+import { Download, Layout, Smartphone, Monitor, Image as ImageIcon, CheckCircle2, Loader2, Sparkles, FolderArchive, FileType, Menu, X, Settings, Filter, Eye } from 'lucide-react';
 
 declare const JSZip: any;
 
 const App: React.FC = () => {
   const [platform, setPlatform] = useState<Platform>(Platform.PC);
   const [theme, setTheme] = useState('');
-  const [style, setStyle] = useState('黑金奢華 (Luxury Gold)');
+  const [style, setStyle] = useState('黑金奢華');
   const [subject, setSubject] = useState('自動匹配');
+  const [pattern, setPattern] = useState('自動匹配');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState('');
@@ -31,17 +32,23 @@ const App: React.FC = () => {
   const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
   const styles = [
-    '黑金奢華 (Luxury Gold)', '霓虹電競 (Cyber Neon)', '節慶紅金 (CNY Style)', 
-    '拉斯維加斯 (Classic Vegas)', '日系動漫 (Anime Style)', '極簡白金 (Minimalist White)', 
-    '深海幽藍 (Deep Sea Blue)', '賽博龐克 (Cyberpunk)', '復古 80s (Retro 80s)', 
-    '高科技感 (High-Tech)', '水墨中國風 (Ink Wash)', '大理石質感 (Marble Texture)', 
-    '歐式宮廷 (European Royal)', '寫實攝影 (Realistic Photo)', '抽象幾何 (Abstract Geometric)'
+    '黑金奢華', '霓虹電競', '節慶紅金', 
+    '拉斯維加斯', '日系動漫', '極簡白金', 
+    '深海幽藍', '賽博龐克', '復古 80s', 
+    '高科技感', '水墨中國風', '大理石質感', 
+    '歐式宮廷', '寫實攝影', '抽象幾何'
   ];
 
   const subjects = [
-    '自動匹配', '美女荷官 (Dealer)', '豪華跑車 (Supercar)', '老虎機 (Slot Machine)', 
-    '撲克與籌碼 (Poker & Chips)', '金幣雨 (Coin Rain)', '奢華手錶 (Luxury Watch)', 
-    '科幻機器人 (Sci-Fi Robot)', '中式錦鯉 (Koi Fish)', '骰子 (Dices)', '獎盃 (Trophy)'
+    '自動匹配', '美女荷官', '豪華跑車', '老虎機', 
+    '撲克與籌碼', '金幣雨', '奢華手錶', 
+    '科幻機器人', '中式錦鯉', '骰子', '獎盃'
+  ];
+
+  const patterns = [
+    '自動匹配', '幾何圖案', '抽象形狀', '花卉設計', 
+    '幾何線條', '波浪圖案', '圓形圖騰', '網格佈局', 
+    '有機形態', '對稱圖案', '極簡點狀', '複雜裝飾'
   ];
 
   const handleGenerate = async () => {
@@ -60,6 +67,7 @@ const App: React.FC = () => {
       title: '', 
       style, 
       subject: subject === '自動匹配' ? '' : subject,
+      pattern: pattern === '自動匹配' ? '' : pattern,
       format: 'png'
     };
     
@@ -83,8 +91,23 @@ const App: React.FC = () => {
       setStatusText(`全套生成完成！`);
     } catch (error: any) {
       console.error("Generate Error:", error);
-      const msg = error.message || "未知錯誤";
-      alert(`生成失敗: ${msg}\n請檢查 API Key 設定是否正確。`);
+      let errorMsg = "未知錯誤";
+      
+      // Handle different error types
+      if (error.message) {
+        errorMsg = error.message;
+        
+        // Check for quota exceeded error (429)
+        if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('Quota exceeded')) {
+          errorMsg = "API 配額已用盡\n\n可能的原因：\n1. 免費配額已用完\n2. 需要升級到付費方案\n3. 請檢查您的 Google AI Studio 帳戶配額\n\n解決方案：\n- 前往 https://ai.google.dev/ 檢查配額\n- 或使用其他 API Key";
+        } else if (errorMsg.includes('API Key') || errorMsg.includes('401') || errorMsg.includes('403')) {
+          errorMsg = "API Key 驗證失敗\n\n請檢查：\n1. API Key 是否正確\n2. API Key 是否有權限使用圖片生成功能\n3. 是否已啟用 Gemini API";
+        }
+      } else if (error.error?.message) {
+        errorMsg = error.error.message;
+      }
+      
+      alert(`生成失敗: ${errorMsg}`);
     } finally {
       setLoading(false);
     }
@@ -105,8 +128,95 @@ const App: React.FC = () => {
       ctx.drawImage(img, 0, 0);
       
       const mimeType = `image/${targetExt === 'jpeg' ? 'jpeg' : targetExt}`;
-      const quality = targetExt === 'jpeg' ? 0.85 : 1;
-      const finalDataUrl = canvas.toDataURL(mimeType, quality);
+      const maxSize = 2 * 1024 * 1024; // 2MB in bytes
+      
+      let finalDataUrl: string;
+      let quality = targetExt === 'jpeg' ? 0.85 : 1;
+      let workCanvas = canvas;
+      
+      // Compress image to ensure file size is under 2MB
+      if (targetExt === 'jpeg') {
+        // For JPEG, reduce quality progressively
+        let attempts = 0;
+        while (attempts < 15) {
+          finalDataUrl = workCanvas.toDataURL(mimeType, quality);
+          const fileSize = getFileSize(finalDataUrl);
+          
+          if (fileSize <= maxSize) break;
+          
+          quality = Math.max(0.3, quality - 0.05);
+          attempts++;
+        }
+        
+        // If still too large, reduce dimensions
+        if (getFileSize(finalDataUrl) > maxSize) {
+          const scaleFactor = Math.sqrt(maxSize / getFileSize(finalDataUrl)) * 0.9;
+          const newWidth = Math.floor(canvas.width * scaleFactor);
+          const newHeight = Math.floor(canvas.height * scaleFactor);
+          
+          const resizedCanvas = document.createElement('canvas');
+          resizedCanvas.width = newWidth;
+          resizedCanvas.height = newHeight;
+          const resizedCtx = resizedCanvas.getContext('2d');
+          if (resizedCtx) {
+            resizedCtx.drawImage(canvas, 0, 0, newWidth, newHeight);
+            finalDataUrl = resizedCanvas.toDataURL(mimeType, 0.8);
+          }
+        }
+      } else if (targetExt === 'png') {
+        // PNG doesn't support quality, so we need to reduce dimensions if too large
+        finalDataUrl = workCanvas.toDataURL(mimeType);
+        let fileSize = getFileSize(finalDataUrl);
+        
+        if (fileSize > maxSize) {
+          const scaleFactor = Math.sqrt(maxSize / fileSize) * 0.9;
+          const newWidth = Math.floor(canvas.width * scaleFactor);
+          const newHeight = Math.floor(canvas.height * scaleFactor);
+          
+          const resizedCanvas = document.createElement('canvas');
+          resizedCanvas.width = newWidth;
+          resizedCanvas.height = newHeight;
+          const resizedCtx = resizedCanvas.getContext('2d');
+          if (resizedCtx) {
+            resizedCtx.drawImage(canvas, 0, 0, newWidth, newHeight);
+            finalDataUrl = resizedCanvas.toDataURL(mimeType);
+          }
+        }
+      } else if (targetExt === 'gif') {
+        // GIF compression is limited, convert to JPEG if too large
+        finalDataUrl = workCanvas.toDataURL(mimeType);
+        let fileSize = getFileSize(finalDataUrl);
+        
+        if (fileSize > maxSize) {
+          // Convert to JPEG for better compression
+          finalDataUrl = workCanvas.toDataURL('image/jpeg', 0.8);
+          fileSize = getFileSize(finalDataUrl);
+          
+          // If still too large, reduce dimensions
+          if (fileSize > maxSize) {
+            const scaleFactor = Math.sqrt(maxSize / fileSize) * 0.9;
+            const newWidth = Math.floor(canvas.width * scaleFactor);
+            const newHeight = Math.floor(canvas.height * scaleFactor);
+            
+            const resizedCanvas = document.createElement('canvas');
+            resizedCanvas.width = newWidth;
+            resizedCanvas.height = newHeight;
+            const resizedCtx = resizedCanvas.getContext('2d');
+            if (resizedCtx) {
+              resizedCtx.drawImage(canvas, 0, 0, newWidth, newHeight);
+              finalDataUrl = resizedCanvas.toDataURL('image/jpeg', 0.8);
+            }
+          }
+          
+          const ext = 'jpg';
+          const link = document.createElement('a');
+          link.href = finalDataUrl;
+          link.download = filename.replace('.png', `.${ext}`);
+          link.click();
+          alert("GIF 檔案過大，已轉換為 JPG 格式下載。");
+          return;
+        }
+      }
       
       const link = document.createElement('a');
       link.href = finalDataUrl;
@@ -117,6 +227,17 @@ const App: React.FC = () => {
       console.error("Download Error:", err);
       alert("下載轉換失敗。");
     }
+  };
+
+  const getFileSize = (dataUrl: string): number => {
+    // Calculate approximate file size from base64 data URL
+    const base64 = dataUrl.split(',')[1];
+    if (!base64) return 0;
+    // Base64 encoding increases size by ~33%, so we decode to get actual size
+    const binaryLength = base64.length * 3 / 4;
+    // Account for padding
+    const padding = base64.endsWith('==') ? 2 : (base64.endsWith('=') ? 1 : 0);
+    return binaryLength - padding;
   };
 
   const downloadZip = async () => {
@@ -152,11 +273,24 @@ const App: React.FC = () => {
               <Sparkles size={20} />
             </div>
             <h1 className="text-lg md:text-xl font-black tracking-tighter uppercase">
-              AI Banner <span className="text-yellow-500">Spec Pro</span>
+              AI 橫幅 <span className="text-yellow-500">規格生成器</span>
             </h1>
           </div>
-          <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="lg:hidden p-2 text-slate-400">
-            {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+          <button 
+            onClick={() => setIsMenuOpen(!isMenuOpen)} 
+            className="flex items-center gap-2 px-4 py-2 text-slate-300 hover:text-yellow-500 transition-colors rounded-xl border border-white/10 hover:border-yellow-500/30 bg-slate-800/50 hover:bg-slate-800"
+          >
+            {isMenuOpen ? (
+              <>
+                <Eye size={18} />
+                <span className="text-xs font-bold uppercase tracking-wide hidden sm:inline">查看預覽畫廊</span>
+              </>
+            ) : (
+              <>
+                <Filter size={18} />
+                <span className="text-xs font-bold uppercase tracking-wide hidden sm:inline">返回設定圖片篩選</span>
+              </>
+            )}
           </button>
         </div>
       </header>
@@ -176,7 +310,7 @@ const App: React.FC = () => {
                     <Monitor size={16} /> PC 網頁版
                   </button>
                   <button onClick={() => setPlatform(Platform.MOBILE)} className={`py-3 rounded-2xl border transition-all text-xs font-bold flex flex-col items-center gap-2 ${platform === Platform.MOBILE ? 'border-yellow-500 bg-yellow-500/10 text-yellow-500' : 'border-white/5 bg-white/5 text-slate-500 opacity-60'}`}>
-                    <Smartphone size={16} /> MB 行動版
+                    <Smartphone size={16} /> 行動版
                   </button>
                 </div>
               </div>
@@ -200,10 +334,17 @@ const App: React.FC = () => {
                     {styles.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase">圖案設計類型</label>
+                  <select value={pattern} onChange={e => setPattern(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 appearance-none cursor-pointer">
+                    {patterns.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
               </div>
 
               <button onClick={handleGenerate} disabled={loading} className={`w-full py-4 rounded-2xl font-black uppercase tracking-tighter shadow-xl transition-all active:scale-95 ${loading ? 'bg-slate-800 text-slate-600' : 'bg-gradient-to-r from-yellow-600 to-yellow-400 text-black hover:from-yellow-500 hover:to-yellow-300 shadow-yellow-500/10'}`}>
-                {loading ? <Loader2 className="animate-spin mx-auto" /> : "Generate Full Set"}
+                {loading ? <Loader2 className="animate-spin mx-auto" /> : "生成完整套組"}
               </button>
 
               {loading && <ProgressBar current={progress} total={platform === Platform.PC ? PC_SPECS.length : MOBILE_SPECS.length} status={statusText} />}
@@ -214,12 +355,12 @@ const App: React.FC = () => {
           <div className="lg:col-span-8">
             <div className="flex items-center justify-between mb-8">
               <h2 className="text-xl font-black uppercase tracking-tight flex items-center gap-3">
-                Preview Gallery
-                {results.length > 0 && <span className="text-xs bg-white/10 text-slate-400 px-2 py-1 rounded-md font-mono">{results.length} FILES</span>}
+                預覽畫廊
+                {results.length > 0 && <span className="text-xs bg-white/10 text-slate-400 px-2 py-1 rounded-md font-mono">{results.length} 個檔案</span>}
               </h2>
               {results.length > 0 && (
                 <button onClick={downloadZip} className="flex items-center gap-2 bg-yellow-500 text-black px-4 py-2 rounded-xl text-xs font-black hover:bg-yellow-400 transition-colors shadow-lg shadow-yellow-500/10">
-                  <FolderArchive size={16} /> ZIP ALL (PNG)
+                  <FolderArchive size={16} /> 打包下載 (PNG)
                 </button>
               )}
             </div>
@@ -228,7 +369,7 @@ const App: React.FC = () => {
               {results.length === 0 && !loading ? (
                 <div className="aspect-video bg-white/5 border-2 border-dashed border-white/10 rounded-[2rem] flex flex-col items-center justify-center text-slate-600">
                   <ImageIcon size={64} className="mb-4 opacity-5" />
-                  <p className="font-bold uppercase tracking-widest text-sm opacity-20">Waiting for Generation</p>
+                  <p className="font-bold uppercase tracking-widest text-sm opacity-20">等待生成中</p>
                 </div>
               ) : (
                 results.map((res, i) => (
@@ -276,7 +417,7 @@ const App: React.FC = () => {
                     <Sparkles className="absolute -top-2 -right-2 text-yellow-300 animate-pulse" size={16} />
                   </div>
                   <p className="text-yellow-500/50 text-xs font-bold uppercase tracking-widest animate-pulse">
-                    Crafting Premium Asset...
+                    正在製作高級素材...
                   </p>
                 </div>
               )}
@@ -287,7 +428,7 @@ const App: React.FC = () => {
 
       <footer className="max-w-7xl mx-auto px-6 mt-20 pt-10 border-t border-white/5 text-center">
         <p className="text-[10px] text-slate-600 font-bold uppercase tracking-[0.2em]">
-          AI Powered Casino Banner System &copy; 2024 Professional Edition
+          AI 驅動娛樂城橫幅系統 &copy; 2024 專業版
         </p>
       </footer>
 

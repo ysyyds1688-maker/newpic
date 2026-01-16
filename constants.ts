@@ -16,7 +16,7 @@ export interface BannerSpec {
 export const PC_SPECS: BannerSpec[] = [
   {
     id: 'pc_home',
-    name: '首頁主橫幅 (Homepage)',
+    name: '首頁主橫幅',
     width: 3200,
     height: 1040,
     usage: '主要登陸頁英雄區塊',
@@ -24,7 +24,7 @@ export const PC_SPECS: BannerSpec[] = [
   },
   {
     id: 'pc_eventlist',
-    name: '活動列表橫幅 (Event List)',
+    name: '活動列表橫幅',
     width: 1160,
     height: 528,
     usage: '促銷列表背景圖',
@@ -32,7 +32,7 @@ export const PC_SPECS: BannerSpec[] = [
   },
   {
     id: 'pc_eventdetail',
-    name: '活動詳情橫幅 (Event Detail)',
+    name: '活動詳情橫幅',
     width: 3840,
     height: 920,
     usage: '高解析度超寬活動頭部',
@@ -43,7 +43,7 @@ export const PC_SPECS: BannerSpec[] = [
 export const MOBILE_SPECS: BannerSpec[] = [
   {
     id: 'mb_home',
-    name: '首頁/促銷列表 (Homepage)',
+    name: '首頁/促銷列表',
     width: 702,
     height: 320,
     usage: '行動版首頁主視覺',
@@ -51,7 +51,7 @@ export const MOBILE_SPECS: BannerSpec[] = [
   },
   {
     id: 'mb_promo',
-    name: '促銷活動橫幅 (Promotion)',
+    name: '促銷活動橫幅',
     width: 560,
     height: 200,
     usage: '特定優惠迷你橫幅',
@@ -59,7 +59,7 @@ export const MOBILE_SPECS: BannerSpec[] = [
   },
   {
     id: 'mb_eventdetail',
-    name: '活動詳情頭部 (Event Detail)',
+    name: '活動詳情頭部',
     width: 750,
     height: 548,
     usage: '行動版活動詳情頁頁首',
@@ -67,7 +67,7 @@ export const MOBILE_SPECS: BannerSpec[] = [
   },
   {
     id: 'mb_vip',
-    name: 'VIP 會員橫幅 (VIP)',
+    name: 'VIP 會員橫幅',
     width: 540,
     height: 260,
     usage: '尊榮會員專屬促銷圖',
@@ -75,7 +75,7 @@ export const MOBILE_SPECS: BannerSpec[] = [
   },
   {
     id: 'mb_wallet',
-    name: '充值提款橫幅 (Wallet)',
+    name: '充值提款橫幅',
     width: 290,
     height: 160,
     usage: '交易區塊功能引導圖',
