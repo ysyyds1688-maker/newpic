@@ -21,17 +21,21 @@ export interface GeneratedImage {
  * 獲取 API KEY，相容不同部署環境
  */
 const getApiKey = (): string => {
-  // 優先從 window.process 讀取（我們在 index.html 定義的）
-  const key = (window as any).process?.env?.API_KEY;
-  if (key) return key;
+  // 優先從 window.process 讀取（運行時注入，適用於 Zeabur 等平台）
+  const runtimeKey = (window as any).process?.env?.API_KEY;
+  if (runtimeKey) return runtimeKey;
   
-  // 嘗試從 Node.js 環境讀取
-  try {
-    // @ts-ignore
-    return (typeof process !== 'undefined' && process.env?.API_KEY) || "";
-  } catch {
-    return "";
-  }
+  // 從 Vite 構建時注入的環境變數讀取（process.env.API_KEY 會被 Vite define 替換）
+  // @ts-ignore - Vite 會在構建時替換 process.env.API_KEY
+  const buildTimeKey = typeof process !== 'undefined' && process.env?.API_KEY;
+  if (buildTimeKey) return buildTimeKey;
+  
+  // 嘗試從 import.meta.env 讀取（Vite 標準方式，需要 VITE_ 前綴）
+  // @ts-ignore
+  const viteKey = import.meta.env?.VITE_API_KEY || import.meta.env?.VITE_GEMINI_API_KEY;
+  if (viteKey) return viteKey;
+  
+  return "";
 };
 
 export async function generateBannerSet(

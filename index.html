@@ -8,9 +8,13 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     // Create process object before all modules load
+    // 支援運行時環境變數注入（適用於某些部署平台）
     window.process = { 
       env: { 
-        NODE_ENV: 'production'
+        NODE_ENV: 'production',
+        // 如果部署平台支援運行時注入，可以在這裡設置 API_KEY
+        // 注意：對於 Vite 應用，建議在構建時通過環境變數設置
+        API_KEY: window.__API_KEY__ || ''
       } 
     };
   </script>
