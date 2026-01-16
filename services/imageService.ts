@@ -18,18 +18,18 @@ export interface GeneratedImage {
 }
 
 /**
- * 終極安全的 API KEY 獲取方式
+ * 獲取 API KEY，相容不同部署環境
  */
 const getApiKey = (): string => {
+  // 優先從 window.process 讀取（我們在 index.html 定義的）
+  const key = (window as any).process?.env?.API_KEY;
+  if (key) return key;
+  
+  // 嘗試從 Node.js 環境讀取
   try {
-    // 優先檢查 window.process (我們的 Polyfill)
-    if (typeof window !== 'undefined' && (window as any).process?.env?.API_KEY) {
-      return (window as any).process.env.API_KEY;
-    }
-    // 備選方案
     // @ts-ignore
     return (typeof process !== 'undefined' && process.env?.API_KEY) || "";
-  } catch (e) {
+  } catch {
     return "";
   }
 };
@@ -44,6 +44,7 @@ export async function generateBannerSet(
     throw new Error("API Key 未設定。請在 Zeabur 環境變數中設定 API_KEY 並重新部署。");
   }
 
+  // 根據 SDK 指導，直接初始化
   const ai = new GoogleGenAI({ apiKey });
   const results: GeneratedImage[] = [];
 
@@ -66,6 +67,7 @@ Usage context: This is for a ${spec.width}x${spec.height} banner.`;
     try {
       const modelAspectRatio = getClosestSupportedAspectRatio(spec.width, spec.height);
       
+      // 使用正確的 generateContent 調用方式
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
@@ -89,7 +91,7 @@ Usage context: This is for a ${spec.width}x${spec.height} banner.`;
       }
 
       if (!base64Data) {
-        throw new Error(`無法獲取圖片數據 (${spec.name})`);
+        throw new Error(`無法從模型獲取圖片數據 (${spec.name})`);
       }
 
       const outputFormat = input.format === 'gif' ? 'gif' : (input.format === 'jpeg' ? 'jpeg' : 'png');
