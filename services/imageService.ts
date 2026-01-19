@@ -7,6 +7,7 @@ export interface GenerationInput {
   title: string;
   style: string;
   subject?: string;
+  pattern?: string;
   format: 'png' | 'jpeg' | 'gif';
 }
 
@@ -61,19 +62,51 @@ export async function generateBannerSet(
     return specArea > maxArea ? spec : max;
   }, specs[0]);
 
-  const subjectPrompt = input.subject ? `The primary visual focus should be ${input.subject}.` : "The primary visual focus should be an appropriate high-end casino or event-related object.";
+  // 處理主體圖案物件
+  let subjectPrompt = '';
+  if (input.subject && input.subject !== '自動匹配') {
+    const subjectMap: Record<string, string> = {
+      '塞特遊戲': 'The primary visual focus should be a powerful Egyptian mythology character inspired by Set (Seth), the god of storms and chaos. Feature a majestic character (male or female) with: elaborate Egyptian-style golden headdress with cobra motifs, ornate golden jewelry and collars, luxurious Egyptian royal garments with gold and blue accents, glowing eyes or mystical aura, dynamic pose with arms extended or holding a staff/scepter, magical blue flames or energy effects. The character must have a HUMAN FACE (not animal head) with Egyptian features - handsome/beautiful human face, dark-skinned, muscular, heroic appearance. Background should have dramatic sky with orange-red to purple-blue gradient, mystical atmosphere with floating light particles. Overall style: high-detail digital game art, epic fantasy, cinematic lighting, vibrant colors, game banner quality similar to "Storm of Seth" or "War God Set" game promotional art.',
+      '索爾遊戲': 'The primary visual focus should be a powerful Norse mythology character inspired by Thor, the god of thunder. Feature a majestic character with: elaborate Norse-style golden armor and helmet, lightning effects and thunderbolts, hammer (Mjolnir) or weapon motifs, glowing eyes with electric energy, dynamic heroic pose, flowing cape or dramatic clothing, storm clouds and lightning in background. The character should have a muscular, heroic appearance with Norse warrior aesthetics. Background should have dramatic stormy sky with purple-blue tones, lightning effects, mystical atmosphere. Overall style: high-detail digital game art, epic fantasy, cinematic lighting, vibrant colors, game banner quality.',
+      '捕魚機鯊魚': 'The primary visual focus should be fishing game elements, prominently featuring sharks in dynamic poses, along with other marine creatures like fish, octopus, or sea monsters. Create an underwater gaming atmosphere.',
+      '捕魚機海洋生物': 'The primary visual focus should be fishing game elements with various marine creatures such as colorful fish, sharks, jellyfish, sea turtles, and other ocean life in an underwater gaming scene.',
+      '角子機': 'The primary visual focus should be slot machine elements, featuring vibrant slot machine symbols, reels, classic casino slot machine aesthetics, or slot machine interface in an exciting composition.',
+      '輪盤': 'The primary visual focus should be roulette wheel elements, featuring roulette wheel designs, betting chips, casino table motifs, or roulette game interface in an elegant casino setting.',
+      '遊戲角色': 'The primary visual focus should be casino game characters, featuring stylized game mascots, dealers, or character designs from popular casino games in an engaging composition.',
+      '娛樂城標誌': 'The primary visual focus should be casino-themed logo elements, featuring casino chips, cards, elegant casino branding motifs, or casino logo designs in a luxurious composition.'
+    };
+    
+    subjectPrompt = subjectMap[input.subject] || `The primary visual focus should be ${input.subject} in a high-end casino or gaming context.`;
+  } else {
+    subjectPrompt = "The primary visual focus should be an appropriate high-end casino or event-related object.";
+  }
   
-  const prompt = `Professional commercial promotional banner for an iGaming/Casino event.
+  // 處理圖案設計類型
+  let patternPrompt = '';
+  if (input.pattern && input.pattern !== '自動匹配') {
+    patternPrompt = `Include ${input.pattern} as decorative patterns and design elements in the background.`;
+  }
+  
+  const prompt = `Create a professional game promotional banner for an iGaming/Casino platform, similar to high-quality game art like "Storm of Seth" or "War God Set" game banners.
+
 Theme: ${input.theme}
-Visual Style: ${input.style}.
+Visual Style: ${input.style}
 Main Subject: ${subjectPrompt}
+${patternPrompt ? `Pattern Design: ${patternPrompt}` : ''}
+
 Design Requirements:
-- HIGH-END AESTHETIC: Sleek, modern, and cinematic.
-- COMPOSITION: Position the main subject to either the left or right side.
-- SAFE ZONE: Leave significant BLANK SPACE on the opposite side of the subject for text overlay.
-- NO TEXT: Strictly NO letters, numbers, or words in the image.
-- QUALITY: Sharp focus, 8k resolution.
-- UNIVERSAL DESIGN: This image will be resized for multiple banner sizes (PC and mobile), so ensure the composition works well at different aspect ratios.`;
+- GAME ART QUALITY: High-detail digital game art style, epic fantasy aesthetic, cinematic game promotional banner quality.
+- CHARACTER DESIGN: If featuring a character, make it powerful, heroic, and visually striking with game-quality character design. Include dynamic poses, glowing effects, magical auras, or energy effects.
+- COMPOSITION: Position the main subject (character or game element) prominently, either to the left or right side of the frame. IMPORTANT: For character subjects, position the character's FACE in the vertical center to upper-center area (between 30% and 60% from the top) to ensure it won't be cropped when resized to wide banner formats. Create a dramatic, engaging composition.
+- BACKGROUND: Create a dramatic, atmospheric background. For mythological themes, use dramatic skies with gradients (orange-red to purple-blue), mystical atmospheres, floating particles, or magical effects. For casino themes, use elegant casino settings or abstract luxurious backgrounds.
+- SAFE ZONE: Leave significant BLANK SPACE on the opposite side of the main subject for text overlay (game titles, buttons, promotional text).
+- NO TEXT: Strictly NO letters, numbers, words, or text in the image itself.
+- LIGHTING: Use dramatic cinematic lighting with strong contrast, rim lighting on characters, and atmospheric glow effects.
+- COLOR PALETTE: Rich, vibrant colors with gold accents for luxury feel. High saturation for game art appeal.
+- QUALITY: Ultra-sharp focus, 8k resolution, professional game banner quality.
+- STYLE REFERENCE: Similar to professional game promotional banners, casino game art, or high-end mobile game marketing materials.
+- UNIVERSAL DESIGN: This image will be resized for multiple banner sizes (PC and mobile), so ensure the composition works well at different aspect ratios while maintaining visual impact.
+${patternPrompt ? '- PATTERN INTEGRATION: Integrate the specified patterns naturally into the background or as decorative elements, ensuring they complement the main subject without overwhelming it.' : ''}`;
 
   try {
     // 使用最大規格的比例生成基礎圖片
@@ -168,15 +201,29 @@ async function processImage(dataUrl: string, targetWidth: number, targetHeight: 
       const targetRatio = targetWidth / targetHeight;
       let sw, sh, sx, sy;
       if (imgRatio > targetRatio) {
+        // 圖片比目標更寬，從左右裁剪
         sh = img.height;
         sw = img.height * targetRatio;
         sx = (img.width - sw) / 2;
         sy = 0;
       } else {
+        // 圖片比目標更高，從上下裁剪
         sw = img.width;
         sh = img.width / targetRatio;
         sx = 0;
-        sy = (img.height - sh) / 2;
+        // 對於寬橫幅（PC版），優先保護垂直中心偏上的區域（人物臉部通常在這裡）
+        // 從底部裁剪更多，保護頂部和中心區域
+        if (targetRatio > 2.5) {
+          // 非常寬的橫幅（如 3200x1040, 3840x920），從底部裁剪更多
+          // 保留頂部 60%，裁剪底部 40%
+          sy = (img.height - sh) * 0.4;
+        } else {
+          // 一般橫幅，稍微偏上保護人物臉部
+          sy = (img.height - sh) * 0.3;
+        }
+        // 確保不會超出邊界
+        if (sy < 0) sy = 0;
+        if (sy + sh > img.height) sy = img.height - sh;
       }
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetWidth, targetHeight);
       const mimeType = `image/${format === 'jpeg' ? 'jpeg' : format}`;

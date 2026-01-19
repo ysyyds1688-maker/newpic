@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Platform, PC_SPECS, MOBILE_SPECS, BannerSpec } from './constants';
 import { generateBannerSet, GeneratedImage, GenerationInput } from './services/imageService';
 import { ProgressBar } from './components/ProgressBar';
-import { Download, Layout, Smartphone, Monitor, Image as ImageIcon, CheckCircle2, Loader2, Sparkles, FolderArchive, FileType, Menu, X, Settings, Filter, Eye } from 'lucide-react';
+import { Download, Layout, Smartphone, Monitor, Image as ImageIcon, CheckCircle2, Loader2, Sparkles, FolderArchive, FileType, Menu, X, Settings, Filter, Eye, Shuffle } from 'lucide-react';
 
 declare const JSZip: any;
 
@@ -36,6 +36,19 @@ const App: React.FC = () => {
 
   const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
+  const randomThemes = [
+    '週年慶豪禮送', '新會員專享', '每日簽到送', '限時優惠', 
+    '首存加碼', '再存回饋', 'VIP 專屬', '節慶大放送',
+    '幸運轉盤', '每日任務', '連勝獎勵', '推薦好友',
+    '生日禮金', '週末特惠', '節日狂歡', '超級大獎',
+    '限時搶購', '雙倍積分', '免費旋轉', '彩金翻倍'
+  ];
+
+  const handleRandomTheme = () => {
+    const randomIndex = Math.floor(Math.random() * randomThemes.length);
+    setTheme(randomThemes[randomIndex]);
+  };
+
   const styles = [
     '黑金奢華', '霓虹電競', '節慶紅金', 
     '拉斯維加斯', '日系動漫', '極簡白金', 
@@ -47,7 +60,9 @@ const App: React.FC = () => {
   const subjects = [
     '自動匹配', '美女荷官', '豪華跑車', '老虎機', 
     '撲克與籌碼', '金幣雨', '奢華手錶', 
-    '科幻機器人', '中式錦鯉', '骰子', '獎盃'
+    '科幻機器人', '中式錦鯉', '骰子', '獎盃',
+    '塞特遊戲', '索爾遊戲', '捕魚機鯊魚', '捕魚機海洋生物',
+    '角子機', '輪盤', '遊戲角色', '娛樂城標誌'
   ];
 
   const patterns = [
@@ -439,8 +454,25 @@ const App: React.FC = () => {
 
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase">活動主題</label>
-                  <input type="text" placeholder="例如：週年慶豪禮送" value={theme} onChange={e => setTheme(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 focus:outline-none placeholder:text-slate-700" />
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-500 uppercase">活動主題</label>
+                    <button
+                      type="button"
+                      onClick={handleRandomTheme}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-yellow-500 hover:text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 hover:border-yellow-500/50 rounded-lg transition-all"
+                      title="隨機選擇活動主題"
+                    >
+                      <Shuffle size={14} />
+                      <span>隨機</span>
+                    </button>
+                  </div>
+                  <input 
+                    type="text" 
+                    placeholder="點擊隨機按鈕或輸入自訂主題" 
+                    value={theme} 
+                    onChange={e => setTheme(e.target.value)} 
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 focus:outline-none placeholder:text-slate-700" 
+                  />
                 </div>
 
                 <div className="space-y-2">
