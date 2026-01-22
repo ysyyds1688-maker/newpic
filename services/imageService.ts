@@ -150,7 +150,8 @@ ${patternPrompt ? '- PATTERN INTEGRATION: Integrate the specified patterns natur
         baseImageUrl, 
         spec.width, 
         spec.height, 
-        outputFormat as any
+        outputFormat as any,
+        'fill' // 使用填滿裁切模式，確保沒有黑邊
       );
 
       results.push({
@@ -182,7 +183,7 @@ function getClosestSupportedAspectRatio(w: number, h: number): "1:1" | "3:4" | "
   ).name;
 }
 
-async function processImage(dataUrl: string, targetWidth: number, targetHeight: number, format: 'png' | 'jpeg' | 'gif'): Promise<string> {
+async function processImage(dataUrl: string, targetWidth: number, targetHeight: number, format: 'png' | 'jpeg' | 'gif', fitMode: 'fit' | 'fill' = 'fit'): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -197,35 +198,47 @@ async function processImage(dataUrl: string, targetWidth: number, targetHeight: 
       }
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
-      const imgRatio = img.width / img.height;
-      const targetRatio = targetWidth / targetHeight;
-      let sw, sh, sx, sy;
-      if (imgRatio > targetRatio) {
-        // 圖片比目標更寬，從左右裁剪
-        sh = img.height;
-        sw = img.height * targetRatio;
-        sx = (img.width - sw) / 2;
-        sy = 0;
+
+      if (fitMode === 'fit') {
+        // 完整顯示模式：等比例縮放並置中，避免任何裁切（可能產生上下或左右邊界）
+        const scale = Math.min(targetWidth / img.width, targetHeight / img.height);
+        const drawWidth = img.width * scale;
+        const drawHeight = img.height * scale;
+        const dx = (targetWidth - drawWidth) / 2;
+        const dy = (targetHeight - drawHeight) / 2;
+
+        ctx.clearRect(0, 0, targetWidth, targetHeight);
+        ctx.fillStyle = "rgba(0,0,0,1)";
+        ctx.fillRect(0, 0, targetWidth, targetHeight);
+        ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, drawWidth, drawHeight);
       } else {
-        // 圖片比目標更高，從上下裁剪
-        sw = img.width;
-        sh = img.width / targetRatio;
-        sx = 0;
-        // 對於寬橫幅（PC版），優先保護垂直中心偏上的區域（人物臉部通常在這裡）
-        // 從底部裁剪更多，保護頂部和中心區域
-        if (targetRatio > 2.5) {
-          // 非常寬的橫幅（如 3200x1040, 3840x920），從底部裁剪更多
-          // 保留頂部 60%，裁剪底部 40%
-          sy = (img.height - sh) * 0.4;
+        // 填滿裁切模式：填滿整個畫布，多餘部分裁切
+        const imgRatio = img.width / img.height;
+        const targetRatio = targetWidth / targetHeight;
+        let sw, sh, sx, sy;
+        if (imgRatio > targetRatio) {
+          // 圖片比目標更寬，從左右裁剪
+          sh = img.height;
+          sw = img.height * targetRatio;
+          sx = (img.width - sw) / 2;
+          sy = 0;
         } else {
-          // 一般橫幅，稍微偏上保護人物臉部
-          sy = (img.height - sh) * 0.3;
+          // 圖片比目標更高，從上下裁剪
+          sw = img.width;
+          sh = img.width / targetRatio;
+          sx = 0;
+          // 對於寬橫幅（PC版），優先保護垂直中心偏上的區域（人物臉部通常在這裡）
+          if (targetRatio > 2.5) {
+            sy = (img.height - sh) * 0.4;
+          } else {
+            sy = (img.height - sh) * 0.3;
+          }
+          if (sy < 0) sy = 0;
+          if (sy + sh > img.height) sy = img.height - sh;
         }
-        // 確保不會超出邊界
-        if (sy < 0) sy = 0;
-        if (sy + sh > img.height) sy = img.height - sh;
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetWidth, targetHeight);
       }
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, targetWidth, targetHeight);
+
       const mimeType = `image/${format === 'jpeg' ? 'jpeg' : format}`;
       resolve(canvas.toDataURL(mimeType, format === 'jpeg' ? 0.92 : 1.0));
     };

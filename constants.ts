@@ -37,6 +37,14 @@ export const PC_SPECS: BannerSpec[] = [
     height: 920,
     usage: '高解析度超寬活動頭部',
     fileName: 'pc_eventdetail_3840x920.png'
+  },
+  {
+    id: 'pc_popup',
+    name: '彈窗活動圖',
+    width: 740,
+    height: 556,
+    usage: 'PC 活動彈窗 / 視窗廣告',
+    fileName: 'pc_popup_740x556.png'
   }
 ];
 
@@ -80,5 +88,13 @@ export const MOBILE_SPECS: BannerSpec[] = [
     height: 160,
     usage: '交易區塊功能引導圖',
     fileName: 'mb_wallet_290x160.png'
+  },
+  {
+    id: 'mb_popup',
+    name: '活動彈窗圖',
+    width: 650,
+    height: 782,
+    usage: '行動版活動彈窗 / 視窗廣告',
+    fileName: 'mb_popup_650x782.png'
   }
 ];
