@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { Platform, PC_SPECS, MOBILE_SPECS, BannerSpec } from './constants';
 import { generateBannerSet, GeneratedImage, GenerationInput } from './services/imageService';
 import { ProgressBar } from './components/ProgressBar';
-import { Download, Layout, Smartphone, Monitor, Image as ImageIcon, CheckCircle2, Loader2, Sparkles, FolderArchive, FileType, Menu, X, Settings, Filter, Eye, Shuffle, Edit2, Move } from 'lucide-react';
+import { Download, Layout, Smartphone, Monitor, Image as ImageIcon, CheckCircle2, Loader2, Sparkles, FolderArchive, FileType, Menu, X, Settings, Filter, Eye, Shuffle, Edit2, Move, MessageSquare, Send, Info } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
 declare const JSZip: any;
@@ -77,7 +77,12 @@ const App: React.FC = () => {
   const [pcResults, setPcResults] = useState<GeneratedImage[]>([]);
   const [mobileResults, setMobileResults] = useState<GeneratedImage[]>([]);
   const [view, setView] = useState<'config' | 'preview'>('config');
-  const [mode, setMode] = useState<'ai' | 'upload'>('ai');
+  const [mode, setMode] = useState<'ai' | 'upload' | 'chat'>('ai');
+  // 對話模式相關狀態
+  const [chatMessages, setChatMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [showChatHelp, setShowChatHelp] = useState(false);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [titleText, setTitleText] = useState('');
   const [subtitleText, setSubtitleText] = useState('');
@@ -574,6 +579,151 @@ Only answer with a short JSON object like: {"id":"gold_neon"}`;
     };
   };
 
+  // 對話模式：處理用戶輸入並理解需求
+  const handleChatSend = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+
+    const userMessage = chatInput.trim();
+    setChatInput('');
+    setChatMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setChatLoading(true);
+
+    try {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        throw new Error("API Key 未設定");
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      
+      // 構建系統提示詞，讓AI理解並提取參數
+      const systemPrompt = `你是一個圖片生成助手，專門幫助用戶生成娛樂城/賭場遊戲風格的橫幅圖片。
+
+用戶會用自然語言描述他們想要的圖片，你需要從中提取以下參數：
+1. theme（活動主題）：例如"新年活動"、"夏日促銷"、"VIP專屬"等
+2. style（視覺風格）：從以下選項中選擇最匹配的：黑金奢華、科技未來、復古經典、簡約現代、動感活力
+3. subject（主體圖案物件）：從以下選項中選擇最匹配的：自動匹配、塞特遊戲、索爾遊戲、捕魚機鯊魚、撲克牌、輪盤、骰子、老虎機
+4. pattern（圖案設計類型）：從以下選項中選擇最匹配的：自動匹配、幾何圖案、火焰紋理、閃電效果、星空背景、水波紋理
+
+重要：這是一個多輪對話，你需要記住之前對話中已經確定的參數。如果用戶在後續對話中修改或補充需求，請更新相應的參數。
+
+請用JSON格式回覆，格式如下：
+{
+  "theme": "提取或更新的主題（如果用戶沒有提到，保留之前的值）",
+  "style": "匹配的風格（如果用戶沒有提到，保留之前的值）",
+  "subject": "匹配的主體（如果用戶沒有提到，保留之前的值）",
+  "pattern": "匹配的圖案（如果用戶沒有提到，保留之前的值）",
+  "reply": "用友好的語氣回覆用戶，確認理解並說明將要生成的圖片特點。如果是多輪對話，可以總結目前確定的所有參數。"
+}
+
+如果用戶的描述不夠明確，請合理推斷或使用"自動匹配"。`;
+
+      // 構建對話歷史上下文（將之前的對話轉換為文本）
+      let conversationContext = '';
+      if (chatMessages.length > 0) {
+        conversationContext = '\n\n之前的對話歷史：\n';
+        chatMessages.forEach((msg, idx) => {
+          conversationContext += `${msg.role === 'user' ? '用戶' : '助手'}: ${msg.content}\n`;
+        });
+        conversationContext += '\n當前用戶的新需求：';
+      }
+
+      // 構建完整的提示詞，包含系統提示、對話歷史和當前需求
+      const fullPrompt = `${systemPrompt}${conversationContext}${userMessage}`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.0-flash',
+        contents: {
+          parts: [{ text: fullPrompt }],
+        },
+      });
+
+      let assistantReply = '';
+      let extractedParams: { theme?: string; style?: string; subject?: string; pattern?: string } = {};
+
+      if (!response || !response.candidates || !response.candidates[0]) {
+        throw new Error('API 沒有返回有效響應');
+      }
+
+      if (response.candidates[0]?.content?.parts) {
+        const textContent = response.candidates[0].content.parts
+          .map((part: any) => part.text || '')
+          .join('');
+
+        if (!textContent || textContent.trim().length === 0) {
+          throw new Error('API 返回的內容為空');
+        }
+
+        // 嘗試解析JSON
+        try {
+          const jsonMatch = textContent.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            extractedParams = {
+              theme: parsed.theme || theme,
+              style: parsed.style || style,
+              subject: parsed.subject || subject,
+              pattern: parsed.pattern || pattern,
+            };
+            assistantReply = parsed.reply || textContent;
+          } else {
+            // 如果沒有JSON格式，直接使用文本內容作為回覆
+            assistantReply = textContent;
+          }
+        } catch (e) {
+          // JSON解析失敗，但至少使用原始文本
+          console.warn('JSON解析失敗，使用原始文本:', e);
+          assistantReply = textContent;
+        }
+      } else {
+        throw new Error('API 響應格式不正確');
+      }
+
+      // 如果成功提取參數，更新狀態
+      if (extractedParams.theme) setTheme(extractedParams.theme);
+      if (extractedParams.style) setStyle(extractedParams.style);
+      if (extractedParams.subject) setSubject(extractedParams.subject);
+      if (extractedParams.pattern) setPattern(extractedParams.pattern);
+
+      // 如果沒有得到回覆，使用默認回覆
+      if (!assistantReply) {
+        assistantReply = '我理解了您的需求，請點擊"生成圖片"按鈕開始生成。';
+      }
+
+      setChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: assistantReply 
+      }]);
+
+    } catch (error: any) {
+      console.error("Chat error:", error);
+      
+      // 提供更詳細的錯誤信息
+      let errorMessage = '抱歉，處理您的需求時發生錯誤。';
+      
+      if (error.message) {
+        if (error.message.includes('API Key') || error.message.includes('401') || error.message.includes('403')) {
+          errorMessage = 'API Key 驗證失敗，請檢查 API Key 設定。';
+        } else if (error.message.includes('429') || error.message.includes('quota')) {
+          errorMessage = 'API 配額已用盡，請稍後再試或檢查配額設定。';
+        } else if (error.message.includes('network') || error.message.includes('fetch')) {
+          errorMessage = '網路連線問題，請檢查網路連線後重試。';
+        } else {
+          errorMessage = `錯誤：${error.message}`;
+        }
+      }
+      
+      errorMessage += '\n\n建議：\n1. 重新描述您的需求\n2. 或使用「AI 一鍵生成」模式直接生成';
+      
+      setChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: errorMessage
+      }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!theme) {
       alert("請輸入活動主題。");
@@ -583,7 +733,6 @@ Only answer with a short JSON object like: {"id":"gold_neon"}`;
     setLoading(true);
     setPcResults([]);
     setMobileResults([]);
-    if (window.innerWidth < 1024) setIsMenuOpen(false);
     
     const input: GenerationInput = { 
       theme, 
@@ -675,7 +824,6 @@ Only answer with a short JSON object like: {"id":"gold_neon"}`;
     setLoading(true);
     setPcResults([]);
     setMobileResults([]);
-    if (window.innerWidth < 1024) setIsMenuOpen(false);
 
     try {
       setStatusText("正在從匯入圖片生成各尺寸...");
@@ -902,7 +1050,7 @@ Only answer with a short JSON object like: {"id":"gold_neon"}`;
               <Sparkles size={20} />
             </div>
             <h1 className="text-lg md:text-xl font-black tracking-tighter uppercase">
-              AI 橫幅 <span className="text-yellow-500">規格生成器</span>
+              <span className="text-yellow-500">圖片生成器</span>
             </h1>
           </div>
           <div className="flex items-center gap-2">
@@ -994,7 +1142,7 @@ Only answer with a short JSON object like: {"id":"gold_neon"}`;
               <div className="space-y-4">
                 <div className="space-y-3 pt-1">
                   <label className="text-xs font-bold text-slate-500 uppercase">生成模式</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => setMode('ai')}
@@ -1019,65 +1167,82 @@ Only answer with a short JSON object like: {"id":"gold_neon"}`;
                     >
                       匯入圖片加字
                     </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase">圖片處理模式</label>
-                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      onClick={() => setImageFitMode('fit')}
+                      onClick={() => setMode('chat')}
                       className={`py-2 rounded-xl text-xs font-bold ${
-                        imageFitMode === 'fit'
+                        mode === 'chat'
                           ? 'bg-yellow-500 text-black'
                           : 'bg-white/5 text-slate-400 border border-white/10'
                       }`}
                       disabled={loading}
-                      title="完整顯示圖片，可能會有黑邊"
                     >
-                      完整顯示
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setImageFitMode('fill')}
-                      className={`py-2 rounded-xl text-xs font-bold ${
-                        imageFitMode === 'fill'
-                          ? 'bg-yellow-500 text-black'
-                          : 'bg-white/5 text-slate-400 border border-white/10'
-                      }`}
-                      disabled={loading}
-                      title="填滿整個畫面，可能裁切部分內容"
-                    >
-                      填滿裁切
+                      <MessageSquare size={14} className="inline mr-1" />
+                      對話生圖
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-500">
-                    {imageFitMode === 'fit' ? '圖片完整顯示，可能會有上下或左右黑邊' : '圖片填滿畫面，多餘部分會被裁切'}
-                  </p>
                 </div>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-500 uppercase">活動主題</label>
-                    <button
-                      type="button"
-                      onClick={handleRandomTheme}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-yellow-500 hover:text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 hover:border-yellow-500/50 rounded-lg transition-all"
-                      title="隨機選擇活動主題"
-                    >
-                      <Shuffle size={14} />
-                      <span>隨機</span>
-                    </button>
-                  </div>
-                  <input 
-                    type="text" 
-                    placeholder="點擊隨機按鈕或輸入自訂主題" 
-                    value={theme} 
-                    onChange={e => setTheme(e.target.value)} 
-                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 focus:outline-none placeholder:text-slate-700" 
-                  />
-                </div>
+                {mode !== 'chat' && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase">圖片處理模式</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setImageFitMode('fit')}
+                          className={`py-2 rounded-xl text-xs font-bold ${
+                            imageFitMode === 'fit'
+                              ? 'bg-yellow-500 text-black'
+                              : 'bg-white/5 text-slate-400 border border-white/10'
+                          }`}
+                          disabled={loading}
+                          title="完整顯示圖片，可能會有黑邊"
+                        >
+                          完整顯示
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setImageFitMode('fill')}
+                          className={`py-2 rounded-xl text-xs font-bold ${
+                            imageFitMode === 'fill'
+                              ? 'bg-yellow-500 text-black'
+                              : 'bg-white/5 text-slate-400 border border-white/10'
+                          }`}
+                          disabled={loading}
+                          title="填滿整個畫面，可能裁切部分內容"
+                        >
+                          填滿裁切
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        {imageFitMode === 'fit' ? '圖片完整顯示，可能會有上下或左右黑邊' : '圖片填滿畫面，多餘部分會被裁切'}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-500 uppercase">活動主題</label>
+                        <button
+                          type="button"
+                          onClick={handleRandomTheme}
+                          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-yellow-500 hover:text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 hover:border-yellow-500/50 rounded-lg transition-all"
+                          title="隨機選擇活動主題"
+                        >
+                          <Shuffle size={14} />
+                          <span>隨機</span>
+                        </button>
+                      </div>
+                      <input 
+                        type="text" 
+                        placeholder="點擊隨機按鈕或輸入自訂主題" 
+                        value={theme} 
+                        onChange={e => setTheme(e.target.value)} 
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 focus:outline-none placeholder:text-slate-700" 
+                      />
+                    </div>
+                  </>
+                )}
 
                 {mode === 'upload' && (
                   <div className="space-y-3 pt-2 border-t border-white/10">
@@ -1333,37 +1498,128 @@ Only answer with a short JSON object like: {"id":"gold_neon"}`;
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase">主體圖案物件</label>
-                  <select value={subject} onChange={e => setSubject(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 appearance-none cursor-pointer">
-                    {subjects.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
+                {mode === 'chat' && (
+                  <div className="space-y-3 pt-2 border-t border-white/10">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-bold text-slate-500 uppercase">對話生圖</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowChatHelp(true)}
+                        className="p-1.5 text-yellow-500 hover:text-yellow-400 hover:bg-yellow-500/10 rounded-lg transition-all"
+                        title="查看使用說明"
+                      >
+                        <Info size={16} />
+                      </button>
+                    </div>
+                    <div className="bg-black/40 border border-white/10 rounded-xl p-3 space-y-3" style={{ maxHeight: '400px', display: 'flex', flexDirection: 'column' }}>
+                      {/* 對話消息列表 */}
+                      <div className="flex-1 overflow-y-auto space-y-3 min-h-[200px] max-h-[250px]">
+                        {chatMessages.length === 0 ? (
+                          <div className="text-center text-slate-500 text-xs py-8">
+                            <MessageSquare size={32} className="mx-auto mb-2 opacity-50" />
+                            <p>用自然語言描述您想要的圖片</p>
+                            <p className="text-[10px] mt-1">例如：「我想要一個新年活動的橫幅，黑金奢華風格，有塞特遊戲角色」</p>
+                          </div>
+                        ) : (
+                          chatMessages.map((msg, idx) => (
+                            <div
+                              key={idx}
+                              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                            >
+                              <div
+                                className={`max-w-[80%] rounded-lg px-3 py-2 text-xs ${
+                                  msg.role === 'user'
+                                    ? 'bg-yellow-500/20 text-yellow-200 border border-yellow-500/30'
+                                    : 'bg-white/5 text-slate-300 border border-white/10'
+                                }`}
+                              >
+                                {msg.content}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                        {chatLoading && (
+                          <div className="flex justify-start">
+                            <div className="bg-white/5 text-slate-300 border border-white/10 rounded-lg px-3 py-2 text-xs">
+                              <Loader2 size={14} className="animate-spin inline mr-2" />
+                              正在理解您的需求...
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      {/* 輸入框 */}
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={chatInput}
+                          onChange={e => setChatInput(e.target.value)}
+                          onKeyPress={e => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleChatSend();
+                            }
+                          }}
+                          placeholder={chatMessages.length === 0 ? "描述您想要的圖片..." : "繼續補充或修改需求，或直接點擊生成按鈕..."}
+                          className="flex-1 bg-black/60 border border-white/10 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-yellow-500 focus:outline-none placeholder:text-slate-600"
+                          disabled={chatLoading}
+                        />
+                        <button
+                          type="button"
+                          onClick={handleChatSend}
+                          disabled={chatLoading || !chatInput.trim()}
+                          className="px-4 py-2 bg-yellow-500 text-black rounded-lg font-bold hover:bg-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {chatLoading ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Send size={14} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                    {chatMessages.length > 0 && (
+                      <p className="text-[10px] text-slate-500 text-center">
+                        AI已理解您的需求，請點擊下方「生成圖片」按鈕開始生成
+                      </p>
+                    )}
+                  </div>
+                )}
 
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase">視覺風格</label>
-                  <select value={style} onChange={e => setStyle(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 appearance-none cursor-pointer">
-                    {styles.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
+                {mode !== 'chat' && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase">主體圖案物件</label>
+                      <select value={subject} onChange={e => setSubject(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 appearance-none cursor-pointer">
+                        {subjects.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
 
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase">圖案設計類型</label>
-                  <select value={pattern} onChange={e => setPattern(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 appearance-none cursor-pointer">
-                    {patterns.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase">視覺風格</label>
+                      <select value={style} onChange={e => setStyle(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 appearance-none cursor-pointer">
+                        {styles.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase">圖案設計類型</label>
+                      <select value={pattern} onChange={e => setPattern(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-yellow-500 appearance-none cursor-pointer">
+                        {patterns.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
               </div>
 
               <button 
-                onClick={mode === 'ai' ? handleGenerate : handleGenerateFromUpload} 
-                disabled={loading} 
-                className={`w-full py-4 rounded-2xl font-black uppercase tracking-tighter shadow-xl transition-all active:scale-95 ${loading ? 'bg-slate-800 text-slate-600' : 'bg-gradient-to-r from-yellow-600 to-yellow-400 text-black hover:from-yellow-500 hover:to-yellow-300 shadow-yellow-500/10'}`}
+                onClick={mode === 'chat' ? handleGenerate : (mode === 'ai' ? handleGenerate : handleGenerateFromUpload)} 
+                disabled={loading || (mode === 'chat' && chatMessages.length === 0)} 
+                className={`w-full py-4 rounded-2xl font-black uppercase tracking-tighter shadow-xl transition-all active:scale-95 ${loading || (mode === 'chat' && chatMessages.length === 0) ? 'bg-slate-800 text-slate-600' : 'bg-gradient-to-r from-yellow-600 to-yellow-400 text-black hover:from-yellow-500 hover:to-yellow-300 shadow-yellow-500/10'}`}
               >
                 {loading ? (
                   <Loader2 className="animate-spin mx-auto" />
                 ) : (
-                  mode === 'ai' ? '生成完整套組' : '匯入圖 + 文字生成套組'
+                  mode === 'chat' ? '生成完整套組' : (mode === 'ai' ? '生成完整套組' : '匯入圖 + 文字生成套組')
                 )}
               </button>
 
@@ -1568,6 +1824,131 @@ Only answer with a short JSON object like: {"id":"gold_neon"}`;
           AI 驅動娛樂城橫幅系統 &copy; 2024 專業版
         </p>
       </footer>
+
+      {/* 對話模式說明彈窗 */}
+      {showChatHelp && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setShowChatHelp(false)}
+        >
+          <div 
+            className="bg-slate-900 border border-yellow-500/30 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 彈窗標題 */}
+            <div className="sticky top-0 bg-slate-900 border-b border-yellow-500/30 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="bg-yellow-500/20 p-2 rounded-lg">
+                  <Info className="text-yellow-500" size={20} />
+                </div>
+                <h2 className="text-lg font-black text-yellow-500 uppercase tracking-tighter">
+                  對話生圖使用說明
+                </h2>
+              </div>
+              <button
+                onClick={() => setShowChatHelp(false)}
+                className="p-2 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* 彈窗內容 */}
+            <div className="px-6 py-6 space-y-6">
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-bold text-yellow-400 mb-2 flex items-center gap-2">
+                    <MessageSquare size={16} />
+                    什麼是對話生圖？
+                  </h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    對話生圖讓您用自然語言描述需求，AI 會自動理解並提取參數（主題、風格、主體、圖案），然後生成圖片。無需手動填寫表單，就像和朋友聊天一樣簡單！
+                  </p>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-bold text-yellow-400 mb-2 flex items-center gap-2">
+                    <Sparkles size={16} />
+                    使用流程
+                  </h3>
+                  <ol className="text-xs text-slate-300 space-y-2 list-decimal list-inside leading-relaxed">
+                    <li>在對話框中輸入您的需求，例如：「我想要一個新年活動的橫幅」</li>
+                    <li>點擊發送按鈕或按 Enter 鍵</li>
+                    <li>AI 會理解您的需求並回覆確認</li>
+                    <li>可以繼續對話補充或修改需求（支援多輪對話）</li>
+                    <li>滿意後，點擊「生成完整套組」按鈕開始生成圖片</li>
+                  </ol>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-bold text-yellow-400 mb-2 flex items-center gap-2">
+                    <Edit2 size={16} />
+                    對話範例
+                  </h3>
+                  <div className="bg-black/40 border border-white/10 rounded-lg p-4 space-y-3">
+                    <div className="flex justify-end">
+                      <div className="bg-yellow-500/20 text-yellow-200 border border-yellow-500/30 rounded-lg px-3 py-2 text-xs max-w-[80%]">
+                        我想要一個新年活動的橫幅
+                      </div>
+                    </div>
+                    <div className="flex justify-start">
+                      <div className="bg-white/5 text-slate-300 border border-white/10 rounded-lg px-3 py-2 text-xs max-w-[80%]">
+                        我理解了，這是一個新年活動主題的橫幅。目前設定：主題-新年活動，其他參數使用自動匹配。您還想補充什麼細節嗎？
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <div className="bg-yellow-500/20 text-yellow-200 border border-yellow-500/30 rounded-lg px-3 py-2 text-xs max-w-[80%]">
+                        改成黑金奢華風格，要有塞特遊戲角色
+                      </div>
+                    </div>
+                    <div className="flex justify-start">
+                      <div className="bg-white/5 text-slate-300 border border-white/10 rounded-lg px-3 py-2 text-xs max-w-[80%]">
+                        好的，已更新：主題-新年活動，風格-黑金奢華，主體-塞特遊戲。請點擊生成按鈕開始生成。
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-bold text-yellow-400 mb-2 flex items-center gap-2">
+                    <CheckCircle2 size={16} />
+                    功能特點
+                  </h3>
+                  <ul className="text-xs text-slate-300 space-y-2 list-disc list-inside leading-relaxed">
+                    <li><strong>多輪對話：</strong>AI 會記住之前的對話內容，可以逐步完善需求</li>
+                    <li><strong>智能提取：</strong>自動從對話中提取主題、風格、主體、圖案等參數</li>
+                    <li><strong>靈活修改：</strong>隨時可以補充或修改需求，無需重新開始</li>
+                    <li><strong>隨時生成：</strong>對話後隨時點擊生成按鈕，使用提取的參數生成圖片</li>
+                  </ul>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-bold text-yellow-400 mb-2 flex items-center gap-2">
+                    <Settings size={16} />
+                    提示與建議
+                  </h3>
+                  <ul className="text-xs text-slate-300 space-y-2 list-disc list-inside leading-relaxed">
+                    <li>可以一次說完所有需求，也可以分多輪補充</li>
+                    <li>描述越詳細，生成的圖片越符合您的期望</li>
+                    <li>如果需求不清楚，AI 會使用「自動匹配」或合理推斷</li>
+                    <li>如果遇到錯誤，可以查看錯誤訊息或改用「AI 一鍵生成」模式</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* 關閉按鈕 */}
+              <div className="pt-4 border-t border-white/10">
+                <button
+                  onClick={() => setShowChatHelp(false)}
+                  className="w-full py-3 bg-yellow-500 text-black rounded-xl font-black uppercase tracking-tighter hover:bg-yellow-400 transition-colors"
+                >
+                  我知道了
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         .custom-scrollbar::-webkit-scrollbar { height: 6px; }
